@@ -11,12 +11,15 @@
 ///
 /// Has no dependencies on any hardware related functions.
 
-static Constant    EXPERIMENT_TREEVIEW_COLUMN = 0
-static Constant    DEVICE_TREEVIEW_COLUMN     = 3
-static Constant    AB_LOAD_SWEEP              = 0
-static Constant    AB_LOAD_STIMSET            = 1
-static StrConstant AB_UDATA_WORKINGDF         = "datafolder"
-static StrConstant AB_WORKFOLDER_NAME         = "workFolder"
+static Constant EXPERIMENT_TREEVIEW_COLUMN = 0
+static Constant DEVICE_TREEVIEW_COLUMN     = 3
+
+static Constant AB_LOAD_SWEEP      = 0
+static Constant AB_LOAD_STIMSET    = 1
+static Constant AB_LOAD_TP_STORAGE = 2
+
+static StrConstant AB_UDATA_WORKINGDF = "datafolder"
+static StrConstant AB_WORKFOLDER_NAME = "workFolder"
 
 static Function AB_ResetListBoxWaves()
 
@@ -365,13 +368,11 @@ static Function AB_LoadFile(discLocation)
 		strswitch(map[%FileType])
 			case ANALYSISBROWSER_FILE_TYPE_IGOR:
 				AB_LoadSweepsFromExperiment(map[%DiscLocation], device)
-				AB_LoadTPStorageFromIgor(map[%DiscLocation], map[%DataFolder], device)
 				AB_LoadUserCommentFromFile(map[%DiscLocation], map[%DataFolder], device)
 				break
 			case ANALYSISBROWSER_FILE_TYPE_NWBv1:
 			case ANALYSISBROWSER_FILE_TYPE_NWBv2:
 				AB_LoadSweepsFromNWB(map[%DiscLocation], map[%DataFolder], device)
-				AB_LoadTPStorageFromNWB(map[%DiscLocation], map[%DataFolder], device)
 				AB_LoadUserCommentAndHistoryFromNWB(map[%DiscLocation], map[%DataFolder], device)
 				break
 			default:
@@ -796,6 +797,37 @@ static Function AB_StoreChannelsBySweep(groupID, nwbVersion, channelList, sweeps
 	SetNumberInWaveNote(storage, NOTE_INDEX, numSweeps)
 End
 
+static Function AB_LoadTPStorageFromFile(string discLocation, string dataFolder, string fileType, string device, [variable overwrite])
+
+	if(ParamIsDefault(overwrite))
+		overwrite = 0
+	else
+		overwrite = !!overwrite
+	endif
+
+	DFREF targetDFR = GetAnalysisDeviceTestpulse(dataFolder, device)
+
+	if(overwrite)
+		KillOrMoveToTrash(dfr = targetDFR)
+	else
+		if(!IsDataFolderEmpty(targetDFR))
+			return 0
+		endif
+	endif
+
+	strswitch(fileType)
+		case ANALYSISBROWSER_FILE_TYPE_IGOR:
+			return AB_LoadTPStorageFromIgor(discLocation, dataFolder, device)
+			break
+		case ANALYSISBROWSER_FILE_TYPE_NWBv1:
+		case ANALYSISBROWSER_FILE_TYPE_NWBv2:
+			return AB_LoadTPStorageFromNWB(discLocation, dataFolder, device)
+			break
+		default:
+			ASSERT(0, "Invalid file type")
+	endswitch
+End
+
 static Function AB_LoadTPStorageFromIgor(expFilePath, expFolder, device)
 	string expFilePath, expFolder, device
 
@@ -821,7 +853,7 @@ static Function AB_LoadTPStorageFromIgor(expFilePath, expFolder, device)
 	return numWavesLoaded
 End
 
-Function AB_LoadTPStorageFromNWB(nwbFilePath, expFolder, device)
+static Function AB_LoadTPStorageFromNWB(nwbFilePath, expFolder, device)
 	string nwbFilePath, expFolder, device
 
 	variable h5_fileID, testpulseGroup, numEntries, i
@@ -1560,7 +1592,7 @@ static Function AB_LoadFromExpandedRange(variable row, variable subSectionColumn
 	for(j = row; j < endRow; j += 1)
 
 		if(AB_GUIRowIsStimsetsOnly(row))
-			if(loadType != AB_LOAD_STIMSET)
+			if(loadType == AB_LOAD_SWEEP)
 				return 1
 			endif
 			device = ""
@@ -1593,6 +1625,12 @@ static Function AB_LoadFromExpandedRange(variable row, variable subSectionColumn
 				endif
 				oneValidLoad = 1
 				break
+			case AB_LOAD_TP_STORAGE:
+				if(AB_LoadTPStorageFromFile(discLocation, dataFolder, fileType, device, overwrite = overwrite) == 1)
+					continue
+				endif
+				oneValidLoad = 1
+				break
 			case AB_LOAD_SWEEP:
 				if(AB_LoadSweepFromFile(discLocation, dataFolder, fileType, device, sweep, overwrite = overwrite) == 1)
 					continue
@@ -1607,7 +1645,7 @@ static Function AB_LoadFromExpandedRange(variable row, variable subSectionColumn
 				SB_AddToSweepBrowser(sweepBrowserDFR, fileName, dataFolder, device, sweep)
 				break
 			default:
-				break
+				ASSERT(0, "Unexpected loadType")
 		endswitch
 	endfor
 
@@ -1668,6 +1706,7 @@ static Function AB_LoadFromFile(loadType, [sweepBrowserDFR])
 		// handle not expanded EXPERIMENT and DEVICE COLUMNS
 		switch(loadType)
 			case AB_LOAD_STIMSET:
+			case AB_LOAD_TP_STORAGE:
 				if(!AB_LoadFromExpandedRange(row, EXPERIMENT_TREEVIEW_COLUMN, loadType, overwrite = overwrite))
 					oneValidLoad = 1
 					continue
@@ -1688,7 +1727,7 @@ static Function AB_LoadFromFile(loadType, [sweepBrowserDFR])
 				endif
 				break
 			default:
-				break
+				ASSERT(0, "Invalid loadType")
 		endswitch
 
 		sweep = str2num(GetLastNonEmptyEntry(expBrowserList, "sweep", row))
@@ -1723,8 +1762,14 @@ static Function AB_LoadFromFile(loadType, [sweepBrowserDFR])
 				dfCollect[index] = dataFolder
 				SetNumberInWaveNote(dfCollect, NOTE_INDEX, index + 1)
 				break
-			default:
+			case AB_LOAD_TP_STORAGE:
+				if(AB_LoadTPStorageFromFile(discLocation, dataFolder, fileType, device, overwrite = overwrite))
+					continue
+				endif
+				oneValidLoad = 1
 				break
+			default:
+				ASSERT(0, "Invalid loadType")
 		endswitch
 	endfor
 
@@ -3568,4 +3613,16 @@ static Function AB_MemoryFreeMappedDF()
 	for(i = 0; i < size; i += 1)
 		AB_RemoveMapEntry(i)
 	endfor
+End
+
+Function AB_ButtonProc_LoadTPStorage(STRUCT WMButtonAction &ba) : ButtonControl
+
+	switch(ba.eventcode)
+		case 2:
+			AB_CheckPanelVersion(ba.win)
+
+			AB_LoadFromFile(AB_LOAD_TP_STORAGE)
+	endswitch
+
+	return 0
 End
