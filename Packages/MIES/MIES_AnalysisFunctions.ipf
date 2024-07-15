@@ -1249,9 +1249,9 @@ Function ReachTargetVoltage(string device, STRUCT AnalysisFunction_V3 &s)
 				DEBUGPRINT(msg)
 
 				retCheckDAScale = SetDAScale(device, i, s.sweepNo, absolute = amps)
-				CheckSetDAScaleReturn(device, retCheckDAScale)
 
 				if(retCheckDAScale)
+					ComplainOutOfRangeDAScale(device, s.sweepNo, INVALID_ANALYSIS_FUNCTION)
 					break
 				endif
 			endfor
@@ -1294,21 +1294,45 @@ Function ReachTargetVoltage(string device, STRUCT AnalysisFunction_V3 &s)
 	endswitch
 End
 
-Function CheckSetDAScaleReturn(string device, variable retValue)
+Function ComplainOutOfRangeDAScale(string device, variable sweepNo, variable anaFuncType)
 
 	variable i
+	string   key
 
-	if(!retValue)
-		return NaN
-	endif
-
-	ASSERT(GetHardwareType(device) != HARDWARE_SUTTER_DAC, "Missing support for Sutter amplififer")
+	ASSERT(GetHardwareType(device) != HARDWARE_SUTTER_DAC, "Missing support for Sutter amplifier")
 
 	printf "(%s) The DAScale value could not be set as it is out-of-range.\r", GetRTStackInfo(2)
 	printf "Please adjust the \"External Command Sensitivity\" in the MultiClamp Commander application and try again.\r"
 	ControlWindowToFront()
 
 	WAVE statusHS = DAG_GetChannelState(device, CHANNEL_TYPE_HEADSTAGE)
+
+	switch(anaFuncType)
+		case PSQ_CHIRP:
+		case PSQ_RAMP:
+		case PSQ_DA_SCALE:
+		case PSQ_SQUARE_PULSE:
+		case PSQ_RHEOBASE:
+			WAVE result = LBN_GetNumericWave()
+			result[0, NUM_HEADSTAGES - 1] = (statusHS[p] == 1)
+			key                           = CreateAnaFuncLBNKey(anaFuncType, PSQ_FMT_LBN_DASCALE_OOR)
+			ED_AddEntryToLabnotebook(device, key, result, overrideSweepNo = sweepNo, unit = LABNOTEBOOK_BINARY_UNIT)
+			break
+		case MSQ_FAST_RHEO_EST:
+		case MSQ_DA_SCALE:
+		case SC_SPIKE_CONTROL:
+			WAVE result = LBN_GetNumericWave()
+			result[0, NUM_HEADSTAGES - 1] = (statusHS[p] == 1)
+			key                           = CreateAnaFuncLBNKey(anaFuncType, MSQ_FMT_LBN_DASCALE_OOR)
+			ED_AddEntryToLabnotebook(device, key, result, overrideSweepNo = sweepNo, unit = LABNOTEBOOK_BINARY_UNIT)
+			break
+		case INVALID_ANALYSIS_FUNCTION: // ReachTargetVoltage
+			// do nothing
+			break
+		default:
+			ASSERT(0, "Unknown analysis function")
+	endswitch
+
 	for(i = 0; i < NUM_HEADSTAGES; i += 1)
 
 		if(!statusHS[i])
