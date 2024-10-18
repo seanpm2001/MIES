@@ -5611,8 +5611,12 @@ Function [variable minimum, variable maximum] DAP_GetDataLimits(string device, v
 	variable minVolt, maxVolt, gain, hardwareType, DAC, minStimset, maxStimset, activeDACIndex
 	string ctrl, text, msg
 
+	if(DAP_DeviceIsUnLocked(device))
+		return [NaN, NaN]
+	endif
+
 	DAC = AFH_GetDACFromHeadstage(device, headstage)
-	if(IsNaN(DAC))
+	if(!IsValidHeadstage(DAC))
 		return [NaN, NaN]
 	endif
 
@@ -5632,7 +5636,6 @@ Function [variable minimum, variable maximum] DAP_GetDataLimits(string device, v
 	WAVE DAQConfigWave = GetDAQConfigWave(device)
 	WAVE DACs          = GetDACListFromConfig(DAQConfigWave)
 	activeDACIndex = GetRowIndex(DACs, val = DAC)
-	ASSERT(IsFinite(activeDACIndex), "Invalid DAC")
 
 	WAVE gains = SWS_GetChannelGains(device, timing = GAIN_BEFORE_DAQ)
 	gain = gains[activeDACIndex]
